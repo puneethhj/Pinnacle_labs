@@ -1,0 +1,70 @@
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import serialization
+import os
+from base64 import urlsafe_b64encode, urlsafe_b64decode
+
+# Encryption function
+def encrypt_image(image_path, password, output_path):
+    with open(image_path, 'rb') as f:
+        image_data = f.read()
+
+    # Derive a key from the password
+    kdf = Scrypt(
+        salt=os.urandom(16),
+        length=32,
+        n=2**14,
+        r=8,
+        p=1,
+        backend=default_backend()
+    )
+    key = kdf.derive(password.encode())
+
+    # Save the salt and nonce for decryption
+    salt = kdf._salt
+    nonce = os.urandom(16)
+
+    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce), backend=default_backend())
+    encryptor = cipher.encryptor()
+    encrypted_data = encryptor.update(image_data) + encryptor.finalize()
+    tag = encryptor.tag
+
+    with open(output_path, 'wb') as f:
+        f.write(salt + nonce + tag + encrypted_data)
+
+# Decryption function
+def decrypt_image(encrypted_path, password, output_path):
+    with open(encrypted_path, 'rb') as f:
+        encrypted_data = f.read()
+
+    salt = encrypted_data[:16]
+    nonce = encrypted_data[16:32]
+    tag = encrypted_data[32:48]
+    ciphertext = encrypted_data[48:]
+
+    # Derive the key from the password and salt
+    kdf = Scrypt(
+        salt=salt,
+        length=32,
+        n=2**14,
+        r=8,
+        p=1,
+        backend=default_backend()
+    )
+    key = kdf.derive(password.encode())
+
+    cipher = Cipher(algorithms.AES(key), modes.GCM(nonce, tag), backend=default_backend())
+    decryptor = cipher.decryptor()
+    decrypted_data = decryptor.update(ciphertext) + decryptor.finalize()
+
+    with open(output_path, 'wb') as f:
+        f.write(decrypted_data)
+
+# Example usage
+password = "your_secure_password"
+encrypt_image('input.jpg', password, 'encrypted_image.enc')
+decrypt_image('encrypted_image.enc', password, 'decrypted_image.jpg')
